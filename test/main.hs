@@ -15,12 +15,15 @@ import Data.Char (isDigit)
 import Data.IORef
 import Data.List (isInfixOf)
 import Data.Maybe (isNothing)
-import System.IO (hClose, hFlush, openBinaryTempFile, hGetContents, hPutStr)
+import System.IO (hClose, hFlush, openBinaryTempFile, hGetContents, hPutStr, hReady)
 import qualified Data.ByteString as SBS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Char8 as S8
 import System.Directory (getTemporaryDirectory, removeFile, exeExtension)
 import System.FilePath ((<.>))
+import System.Posix.Internals (c_close, c_dup2)
+import Foreign.C.Error (throwErrnoIfMinus1_)
+import GHC.IO.Handle.FD (fdToHandle)
 import GHC.Conc.Sync (getUncaughtExceptionHandler, setUncaughtExceptionHandler)
 
 #if defined(__IO_MANAGER_WINIO__)
@@ -56,6 +59,7 @@ main = do
     testKillDoubleWait
     testCreateProcess
     testAddChdir
+    testCloseFds
     testAddChdir2
     testCommunicationHandle False
 #if defined(__IO_MANAGER_WINIO__)
@@ -349,6 +353,24 @@ testAddChdir2 = run "testAddChdir2" $ handleIOErr $ do
   exitCode <- waitForProcess commhand
   print exitCode
   where handleIOErr a = a `catchIOError` \e -> putStrLn ("Exc: " ++ show (ioeGetErrorType e))
+
+testCloseFds :: IO ()
+testCloseFds = unless isWindows $ do
+    check "inherited without close_fds" (proc "cat" []) False
+    check "closed with close_fds" (proc "cat" []) { close_fds = True } True
+  where
+    check label cp expectEOF = run ("close_fds: " ++ label) $ do
+        (r, w) <- createPipeFd
+        let wHigh = 100
+        throwErrnoIfMinus1_ "dup2" (c_dup2 w wHigh)
+        (Just stdin, _, _, ph) <- createProcess cp { std_in = CreatePipe }
+        mapM_ c_close [w, wHigh]
+        rh <- fdToHandle r
+        atEOF <- either isEOFError (const False) <$> try (hReady rh)
+        hClose stdin
+        _ <- waitForProcess ph
+        hClose rh
+        unless (atEOF == expectEOF) $ error label
 
 withCurrentDirectory :: FilePath -> IO a -> IO a
 withCurrentDirectory new inner = do

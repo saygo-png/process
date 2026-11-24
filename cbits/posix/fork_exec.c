@@ -98,6 +98,39 @@ setup_std_handle_fork(int fd,
     }
 }
 
+#if defined(HAVE_CLOSE_RANGE)
+/* Returns -1 if close_range fails, e.g. with ENOSYS before Linux 5.9. */
+static int
+close_range_except(int keep)
+{
+    if (keep < 3) {
+        return close_range(3, ~0U, 0);
+    }
+    if (keep > 3 && close_range(3, keep - 1, 0) == -1) {
+        return -1;
+    }
+    return close_range(keep + 1, ~0U, 0);
+}
+#endif
+
+/* Close every fd from 3 up except `keep`. This runs in the child after fork,
+ * so it may only use async-signal-safe functions. */
+static void
+close_fds_except(int keep)
+{
+#if defined(HAVE_CLOSE_RANGE)
+    if (close_range_except(keep) == 0) {
+        return;
+    }
+#endif
+    int max_fd = get_max_fd();
+    for (int i = 3; i < max_fd; i++) {
+        if (i != keep) {
+            close(i);
+        }
+    }
+}
+
 /* This will `dup` the given fd such that it does not fall in the range of
  * stdin/stdout/stderr, if necessary. The new handle will have O_CLOEXEC.
  *
@@ -257,13 +290,7 @@ do_spawn_fork (char *const args[],
         setup_std_handle_fork(STDERR_FILENO, stdErrHdl, forkCommunicationFds[1]);
 
         if ((flags & RUN_PROCESS_IN_CLOSE_FDS) != 0) {
-            int max_fd = get_max_fd();
-            // XXX Not the pipe
-            for (int i = 3; i < max_fd; i++) {
-                if (i != forkCommunicationFds[1]) {
-                    close(i);
-                }
-            }
+            close_fds_except(forkCommunicationFds[1]);
         }
 
         /* Reset the SIGINT/SIGQUIT signal handlers in the child, if requested

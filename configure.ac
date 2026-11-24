@@ -14,6 +14,9 @@ AC_FUNC_FORK
 AC_CHECK_HEADERS([signal.h sys/wait.h fcntl.h])
 
 AC_CHECK_FUNCS([setitimer sysconf])
+dnl close_range is used to implement close_fds after fork (see fork_exec.c).
+dnl It is available on Linux >= 5.9 with glibc >= 2.34, and on FreeBSD.
+AC_CHECK_FUNCS([close_range])
 AC_CHECK_FUNCS([execvpe])
 AC_CHECK_FUNCS([pipe2],[],[],[
   #define _GNU_SOURCE

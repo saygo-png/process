@@ -1,5 +1,12 @@
 # Changelog for [`process` package](http://hackage.haskell.org/package/process)
 
+## next
+
+* Use `close_range` where available to implement `close_fds` when spawning
+  with `fork`, instead of calling `close` on every fd up to the maximum number
+  of open files, which is slow when that maximum is high
+  ([#189](https://github.com/haskell/process/issues/189))
+
 ## 1.6.30.0 *June 2026*
 
 * darwin: Allow posix_spawn_file_actions_addchdir to be missing when
