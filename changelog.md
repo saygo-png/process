@@ -6,6 +6,9 @@
   with `fork`, instead of calling `close` on every fd up to the maximum number
   of open files, which is slow when that maximum is high
   ([#189](https://github.com/haskell/process/issues/189))
+* Spawn with `posix_spawn` rather than `fork` when `close_fds` is set, where
+  `posix_spawn_file_actions_addclosefrom_np` is available
+  ([#189](https://github.com/haskell/process/issues/189))
 
 ## 1.6.30.0 *June 2026*
 

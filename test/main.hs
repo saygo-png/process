@@ -24,6 +24,9 @@ import System.FilePath ((<.>))
 import System.Posix.Internals (c_close, c_dup2)
 import Foreign.C.Error (throwErrnoIfMinus1_)
 import GHC.IO.Handle.FD (fdToHandle)
+#if !defined(mingw32_HOST_OS)
+import System.Posix.Types (CGid (..))
+#endif
 import GHC.Conc.Sync (getUncaughtExceptionHandler, setUncaughtExceptionHandler)
 
 #if defined(__IO_MANAGER_WINIO__)
@@ -358,6 +361,10 @@ testCloseFds :: IO ()
 testCloseFds = unless isWindows $ do
     check "inherited without close_fds" (proc "cat" []) False
     check "closed with close_fds" (proc "cat" []) { close_fds = True } True
+#if !defined(mingw32_HOST_OS)
+    gid <- c_getgid
+    check "closed with close_fds, using fork" (proc "cat" []) { close_fds = True, child_group = Just gid } True
+#endif
   where
     check label cp expectEOF = run ("close_fds: " ++ label) $ do
         (r, w) <- createPipeFd
@@ -371,6 +378,10 @@ testCloseFds = unless isWindows $ do
         _ <- waitForProcess ph
         hClose rh
         unless (atEOF == expectEOF) $ error label
+
+#if !defined(mingw32_HOST_OS)
+foreign import ccall unsafe "getgid" c_getgid :: IO CGid
+#endif
 
 withCurrentDirectory :: FilePath -> IO a -> IO a
 withCurrentDirectory new inner = do

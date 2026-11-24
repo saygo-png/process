@@ -1,4 +1,5 @@
-// Necessary for POSIX_SPAWN_SETSID and posix_spawn_file_actions_addchdir_np under glibc.
+// Necessary for POSIX_SPAWN_SETSID, posix_spawn_file_actions_addchdir_np and
+// posix_spawn_file_actions_addclosefrom_np under glibc.
 // Moreover this needs to appear before any glibc headers.
 #define _GNU_SOURCE
 
@@ -110,10 +111,13 @@ do_spawn_posix (char *const args[],
     if (childGroup || childUser) {
         return -2;
     }
+#if !defined(HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSEFROM_NP)
     if ((flags & RUN_PROCESS_IN_CLOSE_FDS) != 0) {
-        // TODO: can this be efficiently supported?
+        // Only posix_spawn_file_actions_addclosefrom_np can close them here;
+        // without it, fall back to fork (see close_fds_except in fork_exec.c).
         return -2;
     }
+#endif
 
     // Now the main act...
     pid_t pid;
@@ -207,6 +211,28 @@ do_spawn_posix (char *const args[],
     if (setup_std_handle_spawn(STDERR_FILENO, stdErrHdl, &fa, failed_doing) != 0) {
         goto fail;
     }
+
+#if defined(HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSEFROM_NP)
+    if ((flags & RUN_PROCESS_IN_CLOSE_FDS) != 0) {
+#if defined(HAVE_CLOSE_RANGE)
+        // glibc implements this with close_range, falling back to reading
+        // /proc/self/fd, so posix_spawn fails on kernels without close_range
+        // (Linux < 5.9) where /proc is not mounted. Closing a range in which no
+        // fd can be open tells whether close_range works; if it does not, fall
+        // back to fork, which can always close them (see fork_exec.c).
+        if (close_range(~0U, ~0U, 0) != 0) {
+            goto not_supported;
+        }
+#endif
+        // File actions run in order, so this closes every fd from 3 up after
+        // stdin, stdout and stderr are set up above.
+        r = posix_spawn_file_actions_addclosefrom_np(&fa, 3);
+        if (r != 0) {
+            *failed_doing = "posix_spawn_file_actions_addclosefrom_np";
+            goto fail;
+        }
+    }
+#endif
 
     sigset_t ss;
     if ((flags & RESET_INT_QUIT_HANDLERS) != 0) {
